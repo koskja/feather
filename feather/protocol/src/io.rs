@@ -4,10 +4,9 @@ use crate::{ProtocolVersion, Slot};
 use anyhow::{anyhow, bail, Context};
 use base::{
     anvil::entity::ItemNbt, metadata::MetaEntry, BlockId, BlockPosition, Direction, EntityMetadata,
-    Gamemode, Item, ItemStackBuilder, ValidBlockPosition,
+    Gamemode, Item, ItemStack, ValidBlockPosition,
 };
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
-use libcraft_items::InventorySlot::*;
 use num_traits::{FromPrimitive, ToPrimitive};
 use quill_common::components::PreviousGamemode;
 use serde::{de::DeserializeOwned, Serialize};
@@ -555,29 +554,28 @@ impl Readable for Slot {
             let item = Item::from_id(item_id.try_into()?)
                 .ok_or_else(|| anyhow!("unknown item ID {}", item_id))?;
 
-            // Todo fix: Panics if count is zero
-            Ok(Filled(
-                ItemStackBuilder::with_item(item)
-                    .count(count)
-                    .apply_damage(tags.map(|t| t.damage).flatten())
-                    .into(),
-            ))
+            Ok(Some(ItemStack {
+                item,
+                count,
+                damage: tags.map(|t| t.damage).flatten().map(|d| d as u32),
+            }))
         } else {
-            Ok(Empty)
+            Ok(None)
         }
     }
 }
 
 impl Writeable for Slot {
     fn write(&self, buffer: &mut Vec<u8>, version: ProtocolVersion) -> anyhow::Result<()> {
-        self.is_filled().write(buffer, version)?;
+        self.is_some().write(buffer, version)?;
 
-        if let Filled(stack) = self {
-            VarInt(stack.item().id() as i32).write(buffer, version)?;
-            (stack.count() as u8).write(buffer, version)?;
+        if let Some(stack) = self {
+            VarInt(stack.item.id() as i32).write(buffer, version)?;
+            (stack.count as u8).write(buffer, version)?;
 
             let tags: ItemNbt = stack.into();
             if tags != ItemNbt::default() {
+                dbg!();
                 Nbt(tags).write(buffer, version)?;
             } else {
                 0u8.write(buffer, version)?; // TAG_End
@@ -835,11 +833,7 @@ impl Readable for Angle {
 
 impl Writeable for Angle {
     fn write(&self, buffer: &mut Vec<u8>, version: ProtocolVersion) -> anyhow::Result<()> {
-        let temp = (256.0 / 360.0) * (self.0 % 360.0);
-        // Wrap negative values 'x' in the range [-256.0 to 0] to the
-        // correct angle in the range [0 to 256.0 ) by changing 'x' to
-        // x = 256.0 - x
-        let val = ((temp + 256.0) % 256.0) as u8;
+        let val = (self.0 / 360.0 * 256.0).round() as u8;
         val.write(buffer, version)?;
 
         Ok(())

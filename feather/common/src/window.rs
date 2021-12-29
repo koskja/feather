@@ -1,13 +1,11 @@
 use std::mem;
 
 use anyhow::{anyhow, bail};
-
-use base::{Area, Item};
+use base::{Area, Item, ItemStack};
 
 use ecs::SysResult;
-pub use libcraft_inventory::Window as BackingWindow;
-use libcraft_inventory::WindowError;
-use libcraft_items::InventorySlot::{self, Empty};
+pub use generated::Window as BackingWindow;
+use generated::WindowError;
 use parking_lot::MutexGuard;
 
 /// A player's window. Wraps one or more inventories and handles
@@ -20,7 +18,7 @@ pub struct Window {
     /// The backing window (contains the `Inventory`s)
     inner: BackingWindow,
     /// The item currently held by the player's cursor.
-    cursor_item: InventorySlot,
+    cursor_item: Option<ItemStack>,
     /// Current painting state (mouse drag)
     paint_state: Option<PaintState>,
 }
@@ -30,185 +28,84 @@ impl Window {
     pub fn new(inner: BackingWindow) -> Self {
         Self {
             inner,
-            cursor_item: Empty,
+            cursor_item: None,
             paint_state: None,
         }
     }
 
     /// Left-click a slot in the window.
     pub fn left_click(&mut self, slot: usize) -> SysResult {
-        let slot = &mut *self.inner.item(slot)?;
-        let cursor_slot = &mut self.cursor_item;
+        let mut slot_item = self.inner.item(slot)?;
 
         // Cases:
         // * Either the cursor slot or the clicked slot is empty; swap the two.
         // * Both slots are present but are of different types; swap the two.
         // * Both slots are present and have the same type; merge the two.
-
-        if slot.is_filled() && cursor_slot.is_filled() && cursor_slot.is_mergable(slot) {
-            slot.merge(cursor_slot);
-        } else {
-            mem::swap(cursor_slot, slot);
+        match (slot_item.as_mut(), self.cursor_item.as_mut()) {
+            (Some(slot_item), Some(cursor_item)) => {
+                if cursor_item.has_same_type(slot_item) {
+                    slot_item.merge_with(cursor_item);
+                } else {
+                    mem::swap(slot_item, cursor_item);
+                }
+            }
+            (Some(_), None) => self.cursor_item = slot_item.take(),
+            (None, Some(_)) => *slot_item = self.cursor_item.take(),
+            (None, None) => (),
         }
+
+        drop(slot_item);
+        self.refresh();
 
         Ok(())
     }
 
     /// Right-clicks a slot in the window.
-    pub fn right_click(&mut self, slot_index: usize) -> SysResult {
-        let slot = &mut *self.inner.item(slot_index)?;
-        let cursor_slot = &mut self.cursor_item;
+    pub fn right_click(&mut self, slot: usize) -> SysResult {
+        let mut slot_item = self.inner.item(slot)?;
 
         // Cases:
         // * Cursor slot is present and clicked slot has the same item type; drop one item in the clicked slot.
         // * Clicked slot is present but cursor slot is not; move half the items into the cursor slot.
         // * Both slots are present but differ in type; swap the two.
-
-        match (slot.is_filled(), cursor_slot.is_filled()) {
-            (true, true) => {
-                if slot.is_mergable(cursor_slot) {
-                    cursor_slot.transfer_to(1, slot);
+        match (slot_item.as_mut(), self.cursor_item.as_mut()) {
+            (Some(slot_item), Some(cursor_item)) => {
+                if slot_item.has_same_type(cursor_item) {
+                    cursor_item.transfer_to(1, slot_item);
                 } else {
-                    mem::swap(slot, cursor_slot);
+                    mem::swap(slot_item, cursor_item);
                 }
             }
-            (true, false) => {
-                *cursor_slot = slot.take_half();
-            }
-            (false, true) => {
-                *slot = cursor_slot.try_take(1);
-            }
-            (false, false) => {}
+            (Some(slot_item), None) => self.cursor_item = Some(slot_item.take_half()),
+            (None, Some(cursor_item)) => *slot_item = Some(cursor_item.take(1)),
+            (None, None) => (),
         }
+
+        drop(slot_item);
+        self.refresh();
 
         Ok(())
     }
 
     /// Shift-clicks the given slot. (Either right or left click.)
     pub fn shift_click(&mut self, slot: usize) -> SysResult {
-        // If we are shift clicking on a empty slot, then nothing happens.
-        {
-            let slot_inventory = &mut *self.inner.item(slot)?;
-            if slot_inventory.is_empty() {
-                // Shift clicking on a empty inventory slot does nothing.
-                return Ok(());
-            }
-        }
-
-        match &self.inner {
-            BackingWindow::Player { player: _ } => self.shift_click_in_player_window(slot),
-
-            BackingWindow::Generic9x1 {
-                block: _,
-                player: _,
-            }
-            | BackingWindow::Generic9x2 {
-                block: _,
-                player: _,
-            }
-            | BackingWindow::Generic9x3 {
-                block: _,
-                player: _,
-            }
-            | BackingWindow::Generic9x4 {
-                block: _,
-                player: _,
-            }
-            | BackingWindow::Generic9x5 {
-                block: _,
-                player: _,
-            }
-            | BackingWindow::Generic3x3 {
-                block: _,
-                player: _,
-            }
-            | BackingWindow::Generic9x6 {
-                left_chest: _,
-                right_chest: _,
-                player: _,
-            } => self.shift_click_in_generic_window(slot),
-
-            BackingWindow::Crafting {
-                crafting_table: _,
-                player: _,
-            } => self.shift_click_in_crafting_window(slot),
-            BackingWindow::Furnace {
-                furnace: _,
-                player: _,
-            } => self.shift_click_in_furnace(slot),
-
-            BackingWindow::BlastFurnace {
-                blast_furnace: _,
-                player: _,
-            } => self.shift_click_in_blast_furnace(slot),
-
-            BackingWindow::Smoker {
-                smoker: _,
-                player: _,
-            } => self.shift_click_in_smoker(slot),
-
-            BackingWindow::Enchantment {
-                enchantment_table: _,
-                player: _,
-            } => self.shift_click_in_enchantment(slot),
-
-            BackingWindow::BrewingStand {
-                brewing_stand: _,
-                player: _,
-            } => self.shift_click_in_brewing_window(slot),
-
-            BackingWindow::Beacon {
-                beacon: _,
-                player: _,
-            } => self.shift_click_in_beacon(slot),
-
-            BackingWindow::Anvil {
-                anvil: _,
-                player: _,
-            } => self.shift_click_in_anvil(slot),
-            BackingWindow::Hopper {
-                hopper: _,
-                player: _,
-            } => self.shift_click_in_hopper(slot),
-            BackingWindow::ShulkerBox {
-                shulker_box: _,
-                player: _,
-            } => self.shift_click_in_shulker_box(slot),
-
-            BackingWindow::Cartography {
-                cartography_table: _,
-                player: _,
-            } => self.shift_click_in_cartography_window(slot),
-            BackingWindow::Grindstone {
-                grindstone: _,
-                player: _,
-            } => self.shift_click_in_grindstone(slot),
-            BackingWindow::Lectern {
-                lectern: _,
-                player: _,
-            } => self.shift_click_in_lectern(slot),
-            BackingWindow::Loom { loom: _, player: _ } => self.shift_click_in_loom(slot),
-            BackingWindow::Stonecutter {
-                stonecutter: _,
-                player: _,
-            } => self.shift_click_in_stonecutter(slot),
-        }
-    }
-
-    fn shift_click_in_player_window(&mut self, slot: usize) -> SysResult {
-        let slot_item = &mut *self.inner.item(slot)?;
+        let mut slot_item_guard = self.inner.item(slot)?;
+        let slot_item = match slot_item_guard.as_mut() {
+            Some(item) => item,
+            None => return Ok(()),
+        };
 
         let (inventory, slot_area, _) = self.inner.index_to_slot(slot).unwrap();
+        // TODO: correctly support non-player windows
         let areas_to_try = [
+            Area::Hotbar,
+            Area::Storage,
             Area::Helmet,
             Area::Chestplate,
             Area::Leggings,
             Area::Boots,
             Area::CraftingInput,
-            Area::Hotbar,
-            Area::Storage,
         ];
-
         for &area in &areas_to_try {
             if area == slot_area || !will_accept(area, slot_item) {
                 continue;
@@ -217,103 +114,33 @@ impl Window {
             // Find slot with same type first
             let mut i = 0;
             while let Some(mut stack) = inventory.item(area, i) {
-                if slot_item.is_mergable(&stack) && stack.is_filled() {
-                    stack.merge(slot_item);
+                if let Some(stack) = stack.as_mut() {
+                    if stack.has_same_type(slot_item) {
+                        slot_item.transfer_to(u32::MAX, stack);
+                    }
                 }
                 i += 1;
             }
 
-            if slot_item.is_empty() {
-                return Ok(());
-            }
-        }
-
-        if slot_item.is_filled() {
-            for &area in &areas_to_try {
-                if area == slot_area || !will_accept(area, slot_item) {
-                    continue;
-                }
-
-                // If we still haven't moved all the items, transfer to any empty space
-                let mut i = 0;
-                while let Some(mut stack) = inventory.item(area, i) {
-                    if stack.is_empty() {
-                        stack.merge(slot_item);
-                    }
-                    i += 1;
-                }
-
-                if slot_item.is_empty() {
+            // If we still haven't moved all the items, transfer to any empty space
+            i = 0;
+            while let Some(mut stack) = inventory.item(area, i) {
+                if stack.is_none() {
+                    *stack = Some(slot_item.take(u32::MAX));
                     break;
                 }
+                i += 1;
+            }
+
+            if slot_item.count() == 0 {
+                break;
             }
         }
 
+        drop(slot_item_guard);
+        self.refresh();
+
         Ok(())
-    }
-
-    fn shift_click_in_generic_window(&mut self, _slot: usize) -> SysResult {
-        todo!()
-    }
-
-    fn shift_click_in_crafting_window(&mut self, _slot: usize) -> SysResult {
-        // TODO: If you shift click an item in the crafting table, then you craft
-        // as many as possible. So the items are crafted and put in Area::CraftingOutput
-        // We don't currently have a working crafting system, and once we have we probably
-        // need to change the function signature to get acsess to the crafting system.
-        todo!()
-    }
-
-    fn shift_click_in_furnace(&mut self, _slot: usize) -> SysResult {
-        todo!()
-    }
-
-    fn shift_click_in_blast_furnace(&mut self, _slot: usize) -> SysResult {
-        todo!()
-    }
-
-    fn shift_click_in_smoker(&mut self, _slot: usize) -> SysResult {
-        todo!()
-    }
-
-    fn shift_click_in_enchantment(&mut self, _slot: usize) -> SysResult {
-        todo!()
-    }
-
-    fn shift_click_in_brewing_window(&mut self, _slot: usize) -> SysResult {
-        todo!()
-    }
-
-    fn shift_click_in_beacon(&mut self, _slot: usize) -> SysResult {
-        todo!()
-    }
-
-    fn shift_click_in_anvil(&mut self, _slot: usize) -> SysResult {
-        todo!()
-    }
-
-    fn shift_click_in_hopper(&mut self, _slot: usize) -> SysResult {
-        todo!()
-    }
-
-    fn shift_click_in_shulker_box(&mut self, _slot: usize) -> SysResult {
-        todo!()
-    }
-
-    fn shift_click_in_cartography_window(&mut self, _slot: usize) -> SysResult {
-        todo!()
-    }
-    fn shift_click_in_grindstone(&mut self, _slot: usize) -> SysResult {
-        todo!()
-    }
-    fn shift_click_in_lectern(&mut self, _slot: usize) -> SysResult {
-        todo!()
-    }
-    fn shift_click_in_loom(&mut self, _slot: usize) -> SysResult {
-        todo!()
-    }
-    fn shift_click_in_stonecutter(&mut self, _slot: usize) -> SysResult {
-        todo!()
     }
 
     /// Starts a left mouse paint operation.
@@ -345,18 +172,33 @@ impl Window {
     }
 
     /// Gets the item currently held in the cursor.
-    pub fn cursor_item(&self) -> &InventorySlot {
-        &self.cursor_item
+    pub fn cursor_item(&self) -> Option<ItemStack> {
+        self.cursor_item.clone()
     }
 
-    pub fn item(&self, index: usize) -> Result<MutexGuard<InventorySlot>, WindowError> {
+    /// Refreshes items by fixing item stacks with count=0.
+    fn refresh(&mut self) {
+        Self::refresh_item(&mut self.cursor_item);
+        let mut i = 0;
+        while let Ok(mut slot) = self.inner.item(i) {
+            Self::refresh_item(&mut *slot);
+            i += 1;
+        }
+    }
+
+    fn refresh_item(item: &mut Option<ItemStack>) {
+        if let Some(inner) = item {
+            if inner.count() == 0 {
+                *item = None;
+            }
+        }
+    }
+
+    pub fn item(&self, index: usize) -> Result<MutexGuard<Option<ItemStack>>, WindowError> {
         self.inner.item(index)
     }
 
-    /// Sets an [`InventorySlot`] at the index.
-    /// # Error
-    /// Returns an error if the index is [`WindowError::OutOfBounds`]
-    pub fn set_item(&self, index: usize, item: InventorySlot) -> Result<(), WindowError> {
+    pub fn set_item(&self, index: usize, item: Option<ItemStack>) -> Result<(), WindowError> {
         self.inner.set_item(index, item)
     }
 
@@ -367,46 +209,46 @@ impl Window {
 
 /// Determines whether the given area will accept the given item
 /// for shift-click transfer.
-fn will_accept(area: Area, stack: &InventorySlot) -> bool {
+fn will_accept(area: Area, stack: &ItemStack) -> bool {
     match area {
         Area::Storage => true,
         Area::CraftingOutput => false,
         Area::CraftingInput => false,
         Area::Helmet => matches!(
-            stack.item_kind(),
-            Some(Item::LeatherHelmet)
-                | Some(Item::ChainmailHelmet)
-                | Some(Item::GoldenHelmet)
-                | Some(Item::IronHelmet)
-                | Some(Item::DiamondHelmet)
-                | Some(Item::NetheriteHelmet)
+            stack.item(),
+            Item::LeatherHelmet
+                | Item::ChainmailHelmet
+                | Item::GoldenHelmet
+                | Item::IronHelmet
+                | Item::DiamondHelmet
+                | Item::NetheriteHelmet
         ),
         Area::Chestplate => matches!(
-            stack.item_kind(),
-            Some(Item::LeatherChestplate)
-                | Some(Item::ChainmailChestplate)
-                | Some(Item::GoldenChestplate)
-                | Some(Item::IronChestplate)
-                | Some(Item::DiamondChestplate)
-                | Some(Item::NetheriteChestplate)
+            stack.item(),
+            Item::LeatherChestplate
+                | Item::ChainmailChestplate
+                | Item::GoldenChestplate
+                | Item::IronChestplate
+                | Item::DiamondChestplate
+                | Item::NetheriteChestplate
         ),
         Area::Leggings => matches!(
-            stack.item_kind(),
-            Some(Item::LeatherHelmet)
-                | Some(Item::ChainmailLeggings)
-                | Some(Item::GoldenLeggings)
-                | Some(Item::IronLeggings)
-                | Some(Item::DiamondLeggings)
-                | Some(Item::NetheriteLeggings)
+            stack.item(),
+            Item::LeatherHelmet
+                | Item::ChainmailLeggings
+                | Item::GoldenLeggings
+                | Item::IronLeggings
+                | Item::DiamondLeggings
+                | Item::NetheriteLeggings
         ),
         Area::Boots => matches!(
-            stack.item_kind(),
-            Some(Item::LeatherBoots)
-                | Some(Item::ChainmailBoots)
-                | Some(Item::GoldenBoots)
-                | Some(Item::IronBoots)
-                | Some(Item::DiamondBoots)
-                | Some(Item::NetheriteBoots)
+            stack.item(),
+            Item::LeatherBoots
+                | Item::ChainmailBoots
+                | Item::GoldenBoots
+                | Item::IronBoots
+                | Item::DiamondBoots
+                | Item::NetheriteBoots
         ),
         Area::Hotbar => true,
         Area::Offhand => true,
@@ -414,42 +256,37 @@ fn will_accept(area: Area, stack: &InventorySlot) -> bool {
         Area::FurnaceFuel => true,
         Area::FurnaceOutput => false,
         Area::EnchantmentItem => true,
-        Area::EnchantmentLapis => stack.item_kind() == Some(Item::LapisLazuli),
+        Area::EnchantmentLapis => stack.item() == Item::LapisLazuli,
         Area::BrewingBottle => matches!(
-            stack.item_kind(),
-            Some(Item::GlassBottle)
-                | Some(Item::Potion)
-                | Some(Item::SplashPotion)
-                | Some(Item::LingeringPotion)
+            stack.item(),
+            Item::GlassBottle | Item::Potion | Item::SplashPotion | Item::LingeringPotion
         ),
         Area::BrewingIngredient => true,
-        Area::BrewingBlazePowder => stack.item_kind() == Some(Item::BlazePowder),
+        Area::BrewingBlazePowder => stack.item() == Item::BlazePowder,
         Area::VillagerInput => true,
         Area::VillagerOutput => false,
         Area::BeaconPayment => matches!(
-            stack.item_kind(),
-            Some(Item::IronIngot)
-                | Some(Item::GoldIngot)
-                | Some(Item::Diamond)
-                | Some(Item::NetheriteIngot)
-                | Some(Item::Emerald)
+            stack.item(),
+            Item::IronIngot
+                | Item::GoldIngot
+                | Item::Diamond
+                | Item::NetheriteIngot
+                | Item::Emerald
         ),
         Area::AnvilInput1 => true,
         Area::AnvilInput2 => true,
         Area::AnvilOutput => false,
-        Area::Saddle => stack.item_kind() == Some(Item::Saddle),
+        Area::Saddle => stack.item() == Item::Saddle,
         Area::HorseArmor => matches!(
-            stack.item_kind(),
-            Some(Item::LeatherHorseArmor)
-                | Some(Item::IronHorseArmor)
-                | Some(Item::GoldenHorseArmor)
-                | Some(Item::DiamondHorseArmor)
+            stack.item(),
+            Item::LeatherHorseArmor
+                | Item::IronHorseArmor
+                | Item::GoldenHorseArmor
+                | Item::DiamondHorseArmor
         ),
         Area::LlamaCarpet => true,
-        Area::CartographyMap => {
-            matches!(stack.item_kind(), Some(Item::Map) | Some(Item::FilledMap))
-        }
-        Area::CartographyPaper => stack.item_kind() == Some(Item::Paper),
+        Area::CartographyMap => matches!(stack.item(), Item::Map | Item::FilledMap),
+        Area::CartographyPaper => stack.item() == Item::Paper,
         Area::CartographyOutput => false,
         Area::GrindstoneInput1 => true,
         Area::GrindstoneInput2 => true,
@@ -488,63 +325,50 @@ impl PaintState {
     }
 
     pub fn finish(self, window: &mut Window) -> SysResult {
-        match self.mouse {
-            Mouse::Left => self.handle_left_drag(window),
-            Mouse::Right => self.handle_right_drag(window),
-        }
-        Ok(())
-    }
-
-    /**
-        Splits cursor items evenly into every selected slot.
-        Remainder of even split ends up in `window.cursor_item`.
-    */
-    fn handle_left_drag(&self, window: &mut Window) {
-        // If the cursor has no item then there are no items to share.
-        if window.cursor_item().is_empty() {
-            return;
-        }
-
-        // Number of slots that can contain cursors item kind.
-        let slots = self
-            .slots
-            .iter()
-            .filter(|s| {
-                // unwrap is safe because index is valid.
-                let slot = &*window.inner.item(**s).unwrap();
-                slot.is_mergable(window.cursor_item())
-            })
-            .count() as u32;
-
-        // If slots is 0 that means there are no slots to put items into.
-        // So the cursor keeps all the items.
-        if slots == 0 {
-            return;
+        let cursor_item = match &mut window.cursor_item {
+            Some(item) => item,
+            None => bail!("cannot paint without cursor item"),
         };
 
-        let items_for_cursor = window.cursor_item().count();
-        // This can't be zero because items_cursor is the count of an ItemStack and ItemStack is NonZeroU32.
-        let items_per_slot = (items_for_cursor / slots).max(1);
-        self.move_items_into_slots(window, items_per_slot);
-    }
+        match self.mouse {
+            Mouse::Left => {
+                let amount = cursor_item.count / self.slots.len() as u32;
+                let mut remainder = cursor_item.count % self.slots.len() as u32;
 
-    /// Tries to move items_per_slot items from cursor to the slots that can contain the item
-    fn move_items_into_slots(&self, window: &mut Window, items_per_slot: u32) {
-        for s in &self.slots {
-            let slot = &mut *window.inner.item(*s).unwrap();
-            if !slot.is_mergable(window.cursor_item()) {
-                continue;
+                for slot in self.slots {
+                    if window.inner.item(slot)?.is_some() {
+                        bail!("attempted to overwrite item");
+                    }
+
+                    let amount = if amount > 0 {
+                        amount
+                    } else {
+                        let amount = 1.min(remainder);
+                        remainder -= amount;
+                        amount
+                    };
+                    window
+                        .inner
+                        .set_item(slot, Some(cursor_item.take(amount)))?;
+                }
             }
-
-            window.cursor_item.transfer_to(items_per_slot, slot);
-            if window.cursor_item().is_empty() {
-                break;
-            };
+            Mouse::Right => {
+                for slot in self.slots {
+                    let mut item = window.inner.item(slot)?;
+                    let item = match item.as_mut() {
+                        Some(item) => item,
+                        None => {
+                            *item = Some(cursor_item.take(0));
+                            item.as_mut().unwrap()
+                        }
+                    };
+                    cursor_item.transfer_to(1, &mut *item);
+                }
+            }
         }
-    }
 
-    fn handle_right_drag(&self, window: &mut Window) {
-        self.move_items_into_slots(window, 1)
+        window.refresh();
+        Ok(())
     }
 }
 
@@ -556,7 +380,7 @@ enum Mouse {
 
 #[cfg(test)]
 mod tests {
-    use base::{Inventory, Item, ItemStack};
+    use base::{Inventory, Item};
 
     use super::*;
 
@@ -565,107 +389,89 @@ mod tests {
         let mut window = window();
 
         window.left_click(0).unwrap();
-        assert_eq!(window.cursor_item, Empty);
+        assert_eq!(window.cursor_item, None);
 
-        let stack = ItemStack::new(Item::Diamond, 32).unwrap();
-        window
-            .set_item(0, InventorySlot::Filled(stack.clone()))
-            .unwrap();
+        let stack = ItemStack::new(Item::Diamond, 32);
+        window.set_item(0, Some(stack.clone())).unwrap();
         window.left_click(0).unwrap();
 
-        assert_eq!(window.cursor_item, InventorySlot::Filled(stack.clone()));
-        assert!(window.item(0).unwrap().is_empty());
+        assert_eq!(window.cursor_item, Some(stack.clone()));
+        assert!(window.item(0).unwrap().is_none());
 
         window.left_click(1).unwrap();
-        assert_eq!(window.cursor_item, Empty);
-        assert_eq!(*window.item(1).unwrap(), InventorySlot::Filled(stack));
+        assert_eq!(window.cursor_item, None);
+        assert_eq!(window.item(1).unwrap().as_ref(), Some(&stack));
     }
 
     #[test]
     fn window_left_click_same_item() {
         let mut window = window();
 
-        let item = ItemStack::new(Item::AcaciaSlab, 32).unwrap();
-        window
-            .set_item(0, InventorySlot::Filled(item.clone()))
-            .unwrap();
+        let item = ItemStack::new(Item::AcaciaSlab, 32);
+        window.set_item(0, Some(item.clone())).unwrap();
         window.left_click(0).unwrap();
 
-        window.set_item(1, InventorySlot::Filled(item)).unwrap();
+        window.set_item(1, Some(item)).unwrap();
         window.left_click(1).unwrap();
 
-        assert_eq!(window.cursor_item, Empty);
+        assert_eq!(window.cursor_item, None);
         assert_eq!(
-            *window.item(1).unwrap(),
-            InventorySlot::Filled(ItemStack::new(Item::AcaciaSlab, 64).unwrap())
+            window.item(1).unwrap().as_ref(),
+            Some(&ItemStack::new(Item::AcaciaSlab, 64))
         );
     }
-
-    /*
-        thread 'window::tests::window_left_click_same_item' panicked at 'assertion failed: `(left == right)`
-        left: `Filled(ItemStack { item: AcaciaSlab, count: 32, meta: Some(ItemStackMeta { title: "acacia_slab", lore: "", damage: None, repair_cost: None, enchantments: [] }) })`,
-        right: `Filled(ItemStack { item: AcaciaSlab, count: 64, meta: Some(ItemStackMeta { title: "acacia_slab", lore: "", damage: None, repair_cost: None, enchantments: [] }) })`',
-        feather/common/src/window.rs:452:9
-    */
 
     #[test]
     fn window_right_click_pick_up_half() {
         let mut window = window();
-        let stack = ItemStack::new(Item::GlassPane, 17).unwrap();
-        window.set_item(0, InventorySlot::Filled(stack)).unwrap();
+        let stack = ItemStack::new(Item::GlassPane, 17);
+        window.set_item(0, Some(stack)).unwrap();
 
         window.right_click(0).unwrap();
+        assert_eq!(window.cursor_item, Some(ItemStack::new(Item::GlassPane, 9)));
         assert_eq!(
-            window.cursor_item,
-            InventorySlot::Filled(ItemStack::new(Item::GlassPane, 9).unwrap())
-        );
-        assert_eq!(
-            *window.item(0).unwrap(),
-            InventorySlot::Filled(ItemStack::new(Item::GlassPane, 8).unwrap())
+            window.item(0).unwrap().as_ref(),
+            Some(&ItemStack::new(Item::GlassPane, 8))
         );
     }
 
     #[test]
     fn window_right_click_drop_one_item() {
         let mut window = window();
-        let stack = ItemStack::new(Item::GlassPane, 17).unwrap();
-        window.cursor_item = InventorySlot::Filled(stack);
+        let stack = ItemStack::new(Item::GlassPane, 17);
+        window.cursor_item = Some(stack);
 
         window.right_click(1).unwrap();
         assert_eq!(
             window.cursor_item,
-            InventorySlot::Filled(ItemStack::new(Item::GlassPane, 16).unwrap())
+            Some(ItemStack::new(Item::GlassPane, 16))
         );
         assert_eq!(
-            *window.item(1).unwrap(),
-            InventorySlot::Filled(ItemStack::new(Item::GlassPane, 1).unwrap())
+            window.item(1).unwrap().as_ref(),
+            Some(&ItemStack::new(Item::GlassPane, 1))
         );
     }
 
     #[test]
     fn window_right_click_swap() {
         let mut window = window();
-        let stack1 = ItemStack::new(Item::GlassPane, 17).unwrap();
-        let stack2 = ItemStack::new(Item::Diamond, 2).unwrap();
-        window.cursor_item = InventorySlot::Filled(stack1.clone());
-        window
-            .set_item(0, InventorySlot::Filled(stack2.clone()))
-            .unwrap();
+        let stack1 = ItemStack::new(Item::GlassPane, 17);
+        let stack2 = ItemStack::new(Item::Diamond, 2);
+        window.cursor_item = Some(stack1.clone());
+        window.set_item(0, Some(stack2.clone())).unwrap();
 
         window.right_click(0).unwrap();
-        assert_eq!(window.cursor_item, InventorySlot::Filled(stack2));
-        assert_eq!(*window.item(0).unwrap(), InventorySlot::Filled(stack1));
+        assert_eq!(window.cursor_item, Some(stack2));
+        assert_eq!(window.item(0).unwrap().as_ref(), Some(&stack1));
     }
 
     #[test]
     fn window_shift_click_full_hotbar() {
         let inventory = Inventory::player();
         for i in 0..9 {
-            *inventory.item(Area::Hotbar, i).unwrap() =
-                InventorySlot::Filled(ItemStack::new(Item::EnderPearl, 1).unwrap());
+            *inventory.item(Area::Hotbar, i).unwrap() = Some(ItemStack::new(Item::EnderPearl, 1));
         }
-        *inventory.item(Area::Storage, 0).unwrap() =
-            InventorySlot::Filled(ItemStack::new(Item::AcaciaSign, 1).unwrap());
+        *inventory.item(Area::Storage, 0).unwrap() = Some(ItemStack::new(Item::AcaciaSign, 1));
         let mut window = Window::new(BackingWindow::Player {
             player: inventory.new_handle(),
         });
@@ -675,20 +481,16 @@ mod tests {
             .unwrap();
         window.shift_click(index).unwrap();
         assert_eq!(
-            *window.item(index).unwrap(),
-            InventorySlot::Filled(ItemStack::new(Item::AcaciaSign, 1).unwrap())
+            window.item(index).unwrap().as_ref(),
+            Some(&ItemStack::new(Item::AcaciaSign, 1))
         );
     }
 
     #[test]
     fn window_shift_click_available_item_in_hotbar() {
         let inventory = Inventory::player();
-
-        *inventory.item(Area::Hotbar, 3).unwrap() =
-            InventorySlot::Filled(ItemStack::new(Item::Stone, 4).unwrap());
-        *inventory.item(Area::Storage, 3).unwrap() =
-            InventorySlot::Filled(ItemStack::new(Item::Stone, 7).unwrap());
-
+        *inventory.item(Area::Hotbar, 3).unwrap() = Some(ItemStack::new(Item::Stone, 4));
+        *inventory.item(Area::Storage, 3).unwrap() = Some(ItemStack::new(Item::Stone, 7));
         let mut window = Window::new(BackingWindow::Player {
             player: inventory.new_handle(),
         });
@@ -697,28 +499,23 @@ mod tests {
             .inner()
             .slot_to_index(&inventory, Area::Storage, 3)
             .unwrap();
-
         window.shift_click(index).unwrap();
-
-        dbg!(&window);
 
         let hotbar_index = window
             .inner()
             .slot_to_index(&inventory, Area::Hotbar, 3)
             .unwrap();
-
         assert_eq!(
-            *window.item(hotbar_index).unwrap(),
-            InventorySlot::Filled(ItemStack::new(Item::Stone, 11).unwrap())
+            window.item(hotbar_index).unwrap().as_ref(),
+            Some(&ItemStack::new(Item::Stone, 11))
         );
-        assert!(window.item(index).unwrap().is_empty());
+        assert!(window.item(index).unwrap().is_none());
     }
 
     #[test]
     fn window_shift_click_empty_hotbar() {
         let inventory = Inventory::player();
-        *inventory.item(Area::Storage, 3).unwrap() =
-            InventorySlot::Filled(ItemStack::new(Item::Stone, 7).unwrap());
+        *inventory.item(Area::Storage, 3).unwrap() = Some(ItemStack::new(Item::Stone, 7));
         let mut window = Window::new(BackingWindow::Player {
             player: inventory.new_handle(),
         });
@@ -733,20 +530,17 @@ mod tests {
             .slot_to_index(&inventory, Area::Hotbar, 0)
             .unwrap();
         assert_eq!(
-            *window.item(hotbar_index).unwrap(),
-            InventorySlot::Filled(ItemStack::new(Item::Stone, 7).unwrap())
+            window.item(hotbar_index).unwrap().as_ref(),
+            Some(&ItemStack::new(Item::Stone, 7))
         );
-        assert!(window.item(storage_index).unwrap().is_empty());
+        assert!(window.item(storage_index).unwrap().is_none());
     }
 
     #[test]
     fn left_mouse_paint() {
         let mut window = window();
         window
-            .set_item(
-                0,
-                InventorySlot::Filled(ItemStack::new(Item::Stone, 64).unwrap()),
-            )
+            .set_item(0, Some(ItemStack::new(Item::Stone, 64)))
             .unwrap();
         window.left_click(0).unwrap();
 
@@ -758,30 +552,21 @@ mod tests {
 
         for &slot in &[0, 1, 5] {
             assert_eq!(
-                *window.item(slot).unwrap(),
-                InventorySlot::Filled(ItemStack::new(Item::Stone, 21).unwrap())
+                window.item(slot).unwrap().as_ref(),
+                Some(&ItemStack::new(Item::Stone, 21))
             );
         }
-        assert_eq!(
-            window.cursor_item,
-            InventorySlot::Filled(ItemStack::new(Item::Stone, 1).unwrap())
-        );
+        assert_eq!(window.cursor_item, Some(ItemStack::new(Item::Stone, 1)));
     }
 
     #[test]
     fn right_mouse_paint() {
         let mut window = window();
         window
-            .set_item(
-                0,
-                InventorySlot::Filled(ItemStack::new(Item::Stone, 2).unwrap()),
-            )
+            .set_item(0, Some(ItemStack::new(Item::Stone, 64)))
             .unwrap();
         window
-            .set_item(
-                4,
-                InventorySlot::Filled(ItemStack::new(Item::Stone, 3).unwrap()),
-            )
+            .set_item(4, Some(ItemStack::new(Item::Stone, 3)))
             .unwrap();
         window.left_click(0).unwrap();
 
@@ -791,28 +576,19 @@ mod tests {
         window.end_paint().unwrap();
 
         assert_eq!(
-            *window.item(4).unwrap(),
-            InventorySlot::Filled(ItemStack::new(Item::Stone, 4).unwrap())
+            window.item(4).unwrap().as_ref(),
+            Some(&ItemStack::new(Item::Stone, 4))
         );
         assert_eq!(
-            *window.item(5).unwrap(),
-            InventorySlot::Filled(ItemStack::new(Item::Stone, 1).unwrap())
+            window.item(5).unwrap().as_ref(),
+            Some(&ItemStack::new(Item::Stone, 1))
         );
-        assert_eq!(window.cursor_item, InventorySlot::Empty);
+        assert_eq!(window.cursor_item, Some(ItemStack::new(Item::Stone, 62)));
     }
 
     fn window() -> Window {
         Window::new(BackingWindow::Player {
             player: Inventory::player(),
         })
-    }
-
-    #[test]
-    fn set_item_test() {
-        let window = window();
-
-        window
-            .set_item(45, InventorySlot::new(Item::Stone, 1))
-            .unwrap();
     }
 }

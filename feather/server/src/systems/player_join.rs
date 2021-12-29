@@ -1,4 +1,3 @@
-use libcraft_items::InventorySlot;
 use log::debug;
 
 use base::anvil::player::PlayerAbilities;
@@ -76,7 +75,7 @@ fn accept_new_player(game: &mut Game, server: &mut Server, client_id: ClientId) 
     let hotbar_slot = player_data
         .as_ref()
         .map(|data| HotbarSlot::new(data.held_item as usize))
-        .unwrap_or_else(|_e| HotbarSlot::new(0));
+        .unwrap_or_default();
     client.set_hotbar_slot(hotbar_slot.get() as u8);
 
     let inventory = Inventory::player();
@@ -84,19 +83,9 @@ fn accept_new_player(game: &mut Game, server: &mut Server, client_id: ClientId) 
         player: inventory.new_handle(),
     });
     if let Ok(data) = player_data.as_ref() {
-        for inventory_slot in data.inventory.iter() {
-            let net_slot = inventory_slot.convert_index();
-            let slot = match net_slot {
-                Some(slot) => slot,
-                None => {
-                    log::error!("Failed to convert saved slot into network slot");
-                    continue;
-                }
-            };
-
-            // This can't fail since the earlier match filters out all incorrect indexes.
+        for slot in data.inventory.iter() {
             window
-                .set_item(slot, InventorySlot::Filled(ItemStack::from(inventory_slot)))
+                .set_item(slot.slot as usize, Some(ItemStack::from(slot)))
                 .unwrap();
         }
     }

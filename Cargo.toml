@@ -8,7 +8,6 @@ members = [
     "libcraft/macros",
     "libcraft/particles",
     "libcraft/text",
-    "libcraft/inventory",
 
     # Quill
     "quill/sys-macros",
@@ -30,6 +29,7 @@ members = [
 
     # Feather (common and server)
     "feather/utils",
+    "feather/generated",
     "feather/blocks",
     "feather/blocks/generator",
     "feather/base",

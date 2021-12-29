@@ -38,3 +38,9 @@ impl HotbarSlot {
         Ok(())
     }
 }
+
+impl Default for HotbarSlot {
+    fn default() -> Self {
+        HotbarSlot(0)
+    }
+}

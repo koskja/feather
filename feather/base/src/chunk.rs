@@ -1,7 +1,7 @@
 use std::usize;
 
 use ::blocks::BlockId;
-use libcraft_core::Biome;
+use generated::Biome;
 
 use crate::ChunkPosition;
 

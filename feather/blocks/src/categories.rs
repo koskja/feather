@@ -1,5 +1,5 @@
 use crate::{BlockId, BlockKind};
-use libcraft_blocks::SimplifiedBlockKind;
+use feather_generated::SimplifiedBlockKind;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum PlacementType {

@@ -48,9 +48,11 @@ output_data += f"""
 """
 
 output_data += f"""
-    impl From<Item> for &'static str {{
-        fn from(i: Item) -> Self {{
-            i.name()
+    use std::convert::Into;
+
+    impl Into<&'static str> for Item {{
+        fn into(self) -> &'static str {{
+            self.name()
         }}
     }}
 """

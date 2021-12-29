@@ -1,7 +1,6 @@
 //! Implements level.dat file loading.
 
-use libcraft_core::Biome;
-use libcraft_items::Item;
+use generated::{Biome, Item};
 use serde::{Deserialize, Serialize};
 use std::io::{Cursor, Read, Write};
 use std::{collections::HashMap, fs::File};

@@ -6,7 +6,7 @@ use std::{
 
 use base::{Chunk, ChunkHandle, ChunkLock, ChunkPosition, ChunkSection};
 use blocks::BlockId;
-use libcraft_core::Biome;
+use generated::Biome;
 use serde::{
     de,
     de::{SeqAccess, Visitor},

@@ -1,7 +1,8 @@
-pub use libcraft_blocks::{BlockKind, SimplifiedBlockKind};
 use num_traits::FromPrimitive;
 use std::convert::TryFrom;
 use thiserror::Error;
+
+pub use feather_generated::{BlockKind, SimplifiedBlockKind};
 
 pub mod categories;
 mod directions;

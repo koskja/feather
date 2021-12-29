@@ -146,7 +146,7 @@ impl PropertyStore {
         Property {
             name: ident(name),
             real_name: real_name.to_owned(),
-            _name_camel_case: ident(name.to_camel_case()),
+            name_camel_case: ident(name.to_camel_case()),
             kind: guess_property_kind(&possible_values, &name.to_camel_case()),
             possible_values,
         }

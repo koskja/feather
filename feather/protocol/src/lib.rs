@@ -1,4 +1,5 @@
 use anyhow::anyhow;
+use base::ItemStack;
 
 pub mod codec;
 pub mod io;
@@ -8,7 +9,6 @@ pub mod packets;
 pub use codec::MinecraftCodec;
 pub use io::Nbt;
 pub use io::{Readable, VarInt, VarLong, Writeable};
-use libcraft_items::InventorySlot;
 #[doc(inline)]
 pub use packets::{
     client::{ClientHandshakePacket, ClientLoginPacket, ClientPlayPacket, ClientStatusPacket},
@@ -16,7 +16,7 @@ pub use packets::{
     VariantOf,
 };
 
-pub type Slot = InventorySlot;
+pub type Slot = Option<ItemStack>;
 
 /// A protocol version.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]

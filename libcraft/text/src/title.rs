@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 // Based on https://wiki.vg/index.php?title=Protocol&oldid=16459#Title
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Title {
     pub title: Option<String>,
     pub sub_title: Option<String>,
@@ -26,4 +26,16 @@ impl Title {
         stay: 0,
         fade_out: 0,
     };
+}
+
+impl Default for Title {
+    fn default() -> Self {
+        Title {
+            title: None,
+            sub_title: None,
+            fade_in: 0,
+            stay: 0,
+            fade_out: 0,
+        }
+    }
 }
