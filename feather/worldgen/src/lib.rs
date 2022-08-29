@@ -41,9 +41,9 @@ pub trait WorldGenerator: Send + Sync {
     fn generate_chunk(&self, position: ChunkPosition) -> Chunk;
 }
 
-pub struct EmptyWorldGenerator {}
+pub struct VoidWorldGenerator;
 
-impl WorldGenerator for EmptyWorldGenerator {
+impl WorldGenerator for VoidWorldGenerator {
     fn generate_chunk(&self, position: ChunkPosition) -> Chunk {
         Chunk::new(position)
     }
@@ -340,9 +340,9 @@ impl NearbyBiomes {
         let chunk_x = (x / 16) as usize;
         let chunk_z = (z / 16) as usize;
 
-        let mut local_x = (ox % 16).abs() as usize;
-        let local_y = (oy % 16).abs() as usize;
-        let mut local_z = (oz % 16).abs() as usize;
+        let mut local_x = (ox % 16).unsigned_abs();
+        let local_y = (oy % 16).unsigned_abs();
+        let mut local_z = (oz % 16).unsigned_abs();
 
         if ox < 0 {
             local_x = 16 - local_x;
@@ -408,9 +408,9 @@ mod tests {
     }
 
     #[test]
-    pub fn test_worldgen_empty() {
+    pub fn test_worldgen_void() {
         let chunk_pos = ChunkPosition { x: 1, z: 2 };
-        let generator = EmptyWorldGenerator {};
+        let generator = VoidWorldGenerator;
         let chunk = generator.generate_chunk(chunk_pos);
 
         // No sections have been generated
