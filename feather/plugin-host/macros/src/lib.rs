@@ -10,7 +10,7 @@ pub fn host_function(
 ) -> proc_macro::TokenStream {
     let input: syn::ItemFn = syn::parse_macro_input!(input);
 
-    let ident = input.sig.ident.clone();
+    let ident = &input.sig.ident;
     let gateway_ident = format_ident!("{}_gateway", input.sig.ident);
     let struct_ident = format_ident!("{}_struct", input.sig.ident);
 

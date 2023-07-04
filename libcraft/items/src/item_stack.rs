@@ -62,7 +62,7 @@ impl ItemStack {
             count,
             meta: Some(ItemStackMeta {
                 title: String::from(item.name()),
-                lore: "".to_owned(),
+                lore: String::new(),
                 damage: None,
                 repair_cost: None,
                 enchantments: vec![],
@@ -371,7 +371,7 @@ pub enum ItemStackError {
 
 impl Display for ItemStackError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}", self)
+        write!(f, "{self:?}")
     }
 }
 
@@ -382,7 +382,7 @@ impl ItemStackMeta {
     pub fn new(item: Item) -> Self {
         Self {
             title: item.display_name().to_owned(),
-            lore: "".to_owned(),
+            lore: String::new(),
             damage: None,
             repair_cost: None,
             enchantments: vec![],

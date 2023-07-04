@@ -44,6 +44,8 @@ const WASM_FEATURES: Features = Features {
     multi_memory: false,
     memory64: false,
     exceptions: true,
+    relaxed_simd: false,
+    extended_const: false,
 };
 
 /// Unique ID of a plugin.

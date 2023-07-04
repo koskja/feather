@@ -86,7 +86,7 @@ impl Build {
 }
 
 fn main() -> anyhow::Result<()> {
-    let args: CargoQuill = argh::from_env();
+    let args: CargoQuill = argh::cargo_from_env();
     match args.subcommand {
         Subcommand::Build(args) => build(args),
     }
@@ -126,8 +126,8 @@ fn cargo_build_command(args: &Build) -> Command {
     }
 
     if !args.native {
-        cmd.args(&["--target", WASM_TARGET]);
-        cmd.args(&["--", "-C", WASM_TARGET_FEATURES]);
+        cmd.args(["--target", WASM_TARGET]);
+        cmd.args(["--", "-C", WASM_TARGET_FEATURES]);
     }
 
     cmd.stdout(Stdio::piped());

@@ -269,7 +269,7 @@ mod test {
         let mut a = InventorySlot::new(Item::Stone, 5);
         let mut b = InventorySlot::new(Item::Stone, 30);
         a.merge(&mut b);
-        println!("{:?}", a);
+        println!("{a:?}");
         assert!(a.is_mergable(&b));
         assert_eq!(a.count(), 35);
         assert!(b.is_empty());
