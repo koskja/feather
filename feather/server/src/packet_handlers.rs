@@ -139,6 +139,7 @@ fn handle_chat_message(game: &mut Game, player: Entity, packet: client::ChatMess
         } else {
             game.set_gamemode(player, Gamemode::Survival)?;
         }
+        return Ok(())
     }
 
     let name = game.ecs.get::<Name>(player)?;

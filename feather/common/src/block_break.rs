@@ -1,7 +1,7 @@
 use anyhow::Context;
 use base::{inventory::SLOT_HOTBAR_OFFSET, BlockKind, ItemStack, ValidBlockPosition};
 use ecs::{Entity, SysResult, SystemExecutor};
-use libcraft_items::EnchantmentKind;
+use libcraft_items::{EnchantmentKind};
 use quill_common::components::Instabreak;
 
 pub struct DestroyStateChange(pub ValidBlockPosition, pub u8);
@@ -63,7 +63,7 @@ pub fn finish_digging(
     };
     if success {
         let pos = game.ecs.get::<ActiveBreaker>(player)?.position;
-        game.break_block(pos); // TODO: drop an item
+        game.break_block(pos); // TODO: drop an item, damage tool
         game.ecs.remove::<ActiveBreaker>(player)?;
     }
     game.ecs

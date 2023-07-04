@@ -5,7 +5,6 @@ use base::anvil::level::SuperflatGeneratorOptions;
 use common::{Game, TickLoop, World};
 use ecs::SystemExecutor;
 use feather_server::{config::Config, Server};
-use plugin_host::PluginManager;
 use worldgen::{ComposableGenerator, SuperflatWorldGenerator, VoidWorldGenerator, WorldGenerator};
 
 mod logging;
@@ -77,11 +76,11 @@ fn init_world_source(game: &mut Game, config: &Config) {
 }
 
 fn init_plugin_manager(game: &mut Game) -> anyhow::Result<()> {
-    let mut plugin_manager = PluginManager::new();
+    /*let mut plugin_manager = PluginManager::new();
     plugin_manager.load_dir(game, PLUGINS_DIRECTORY)?;
 
     let plugin_manager_rc = Rc::new(RefCell::new(plugin_manager));
-    game.insert_resource(plugin_manager_rc);
+    game.insert_resource(plugin_manager_rc);*/
     Ok(())
 }
 

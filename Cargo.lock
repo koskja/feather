@@ -987,7 +987,6 @@ dependencies = [
  "feather-base",
  "feather-common",
  "feather-ecs",
- "feather-plugin-host",
  "feather-protocol",
  "feather-utils",
  "feather-worldgen",
